@@ -1,5 +1,3 @@
-Security project 2
-
 TCP Proxy
 
 Overview:
