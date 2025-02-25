@@ -1,6 +1,7 @@
 import sys
 import socket
 import threading
+import time
 
 # HEXFILTER string, contains ASCII printable chars (0-255) and (.) if not
 HEX_FILTER = ''.join([(len(repr(chr(i))) == 3) and chr(i) or '.' for i in range(256)])
@@ -25,12 +26,12 @@ def hexdump(src, length=16, show=True):
         return results
 
 # for recieveing both local and remote data
-def revieve_from(connection):
+def recieve_from(connection):
     buffer = b""
     connection.settimeout(5)
     try:
         while True:
-            data = connection.recv(4096)
+            data = connection.recv(16384)
             if not data:
                 break
             buffer += data
@@ -52,6 +53,7 @@ def proxy_handler(client_socket, remote_host, remote_port, recieve_first):
     remote_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     remote_socket.connect((remote_host, remote_port)) # connect to remote host
 
+    remote_buffer = b""
     # check to make sure we don't need to first initiate a connection before the main loop
     if recieve_first:
         remote_buffer = recieve_from(remote_socket)
@@ -63,6 +65,7 @@ def proxy_handler(client_socket, remote_host, remote_port, recieve_first):
         print("[<==] Sending %d bytes to localhost." % len(remote_buffer))
         client_socket.send(remote_buffer)
 
+    idle_counter = 0
     while True:
         local_buffer = recieve_from(client_socket) # read from local client
         if len(local_buffer):
@@ -73,6 +76,7 @@ def proxy_handler(client_socket, remote_host, remote_port, recieve_first):
             local_buffer = request_handler(local_buffer)
             remote_socket.send(local_buffer)
             print("[==>] Sent to remote.") # send to remote
+            idle_counter = 0
 
         remote_buffer = recieve_from(remote_socket)
         if (len(remote_buffer)):
@@ -82,12 +86,16 @@ def proxy_handler(client_socket, remote_host, remote_port, recieve_first):
             remote_buffer = request_handler(remote_buffer)
             client_socket.send(remote_buffer)
             print("[<==] Sent to localhost.")# sent to localhost
+            idle_counter = 0
 
-        if not len(local_buffer) or not len(remote_buffer): # closing connections
-            client_socket.close()
-            remote_socket.close()
-            print("[*] No more data. closing connections.")
-            break
+        if not len(local_buffer) and not len(remote_buffer): # closing connections if both sides return on data
+            idle_counter += 1
+            time.sleep(5)
+            if idle_counter > 50:
+                client_socket.close()
+                remote_socket.close()
+                print("[*] Connection idle. closing connections.")
+                break
 
 # function to setup and manage the connection
 def server_loop(local_host, local_port, remote_host, remote_port, recieve_first):
